@@ -4,27 +4,43 @@ Permanent image storage for Fiera Real Estate UK project assets, integrated with
 
 ## Purpose
 
-Airtable attachment URLs expire after a short period, making them unsuitable as a stable image source for Power BI. This repo solves that by acting as permanent public image storage. A sync script runs hourly via GitHub Actions, detects new images in Airtable, commits them here, and writes a permanent URL back to the Airtable record.
+Airtable attachment URLs expire after a short period, making them unsuitable as a stable image source for Power BI. This repo solves that by acting as permanent public image storage. A sync script runs hourly via GitHub Actions, detects new images across configured Airtable tables, commits them here, and writes a permanent URL back to each Airtable record.
+
+## Business context
+
+Images are managed across two Airtable bases reflecting the structure of the two main business lines:
+
+- **Equity** — deals are always single-property. Images are stored at the deal level in the **Assets** table (`app6kSWgnKx3E5ULh`). One image per record.
+- **Debt** — deals can span multiple properties. Images are stored at the property level in the **Properties** table (`appVinwKwEnt5HAIk`), with one image per property record. This allows each property in a deal to carry its own image independently.
+
+In both cases, only the first attachment per record is synced.
 
 ## How it works
 
 ```
-Airtable (Assets table) → GitHub Actions (hourly) → images/ committed to this repo → Permanent URL written back to Airtable → Power BI reads stable URL
+Airtable record (attachment added)
+→ GitHub Actions (hourly)
+→ sync_images.py detects records where attachment exists but permanent URL is empty
+→ Image downloaded using Airtable's expiring URL
+→ Image committed to images/ using Airtable record ID as filename
+→ Permanent URL written back to Airtable
+→ Power BI reads stable URL
 ```
 
-1. A new record is added to the **Assets** table in Airtable with a photo attached
-2. The hourly GitHub Action runs `sync_images.py`
-3. The script finds records where **Photos** is populated but **Permanent Photo URL** is empty
-4. It downloads the image using Airtable's (expiring) attachment URL
-5. It commits the image to `images/` using the Airtable record ID as the filename (e.g. `rec24BIUIrp0lI3V1.jpg`)
-6. It writes the permanent `raw.githubusercontent.com` URL back to the **Permanent Photo URL** field in Airtable
-7. Power BI reads **Permanent Photo URL** — URLs never expire and work in PDF/PowerPoint exports
+## Airtable configuration
+
+| Base | Base ID | Table | Attachment Field | URL Field |
+|---|---|---|---|---|
+| Equity | app6kSWgnKx3E5ULh | Assets | Photos | Permanent Photo URL |
+| Debt | appVinwKwEnt5HAIk | Properties | Photo | Photo URL |
+
+To add a third table in future, add an entry to the `TABLES` list at the top of `sync_images.py` — no other changes needed.
 
 ## Repo structure
 
 ```
 Asset-Images/
-├── images/                  # All project images, named by Airtable record ID
+├── images/                  # All images, named by Airtable record ID (e.g. rec24BIUIrp0lI3V1.jpg)
 ├── sync_images.py           # Sync script
 ├── .github/
 │   └── workflows/
@@ -32,16 +48,7 @@ Asset-Images/
 └── README.md
 ```
 
-## Airtable setup
-
-| Detail | Value |
-|---|---|
-| Base ID | app6kSWgnKx3E5ULh |
-| Table | Assets |
-| Attachment field | Photos |
-| URL field | Permanent Photo URL (Single line text) |
-
-Only the first image per record is synced. If a record has multiple photos, only the first attachment is processed.
+Filenames use the Airtable record ID, which is unique across all bases, so there is no collision risk between the two tables sharing the same `images/` directory.
 
 ## GitHub Actions
 
@@ -49,7 +56,7 @@ The workflow runs on two triggers:
 - **Scheduled** — every hour (`0 * * * *`)
 - **Manual** — via the Actions tab → "Run workflow" (useful for testing or forcing an immediate sync)
 
-Logs for each run are available in the Actions tab. Each processed record prints either a ✓ with the committed URL or a ✗ with the error reason.
+Logs for each run are available in the Actions tab. Each table is processed in sequence. Each record prints either a ✓ with the committed URL or a ✗ with the error reason.
 
 ## Secrets
 
@@ -57,19 +64,26 @@ One secret is required, set under **Settings → Secrets and variables → Actio
 
 | Secret | Description |
 |---|---|
-| `AIRTABLE_PAT` | Airtable Personal Access Token with read/write access to the Assets table |
+| `AIRTABLE_PAT` | Airtable Personal Access Token with read/write access to both the Assets and Properties tables |
 
 `GITHUB_TOKEN` is provided automatically by GitHub Actions — no setup needed.
 
-## Migrating existing records from SharePoint
+> **Note:** Ensure the Airtable PAT has access to both bases (`app6kSWgnKx3E5ULh` and `appVinwKwEnt5HAIk`). If the Properties sync fails on first run, check the token's base permissions in Airtable's token settings.
 
-Any existing asset records that currently have a SharePoint URL in **Permanent Photo URL** will not be picked up automatically — the script only processes records where that field is empty.
+## Migrating existing records
+
+Any records that currently have a URL in their permanent URL field (e.g. a legacy SharePoint link) will be skipped — the script only processes records where that field is empty.
 
 To migrate them:
-1. Clear the **Permanent Photo URL** field on the relevant Airtable records
+1. Clear the relevant URL field on the Airtable records to be migrated
 2. Trigger the workflow manually via the Actions tab
 3. The script will process them on the next run
 
 ## Power BI
 
-Use the **Permanent Photo URL** field as your image URL column. These URLs are permanent, publicly accessible, and will render correctly in PDF and PowerPoint exports — unlike the previous SharePoint-based URLs which required authentication.
+| Business Line | Field to use as image URL column |
+|---|---|
+| Equity | Permanent Photo URL (Assets table) |
+| Debt | Photo URL (Properties table) |
+
+These URLs are permanent, publicly accessible, and render correctly in PDF and PowerPoint exports.
