@@ -4,18 +4,28 @@ import requests
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Config — matches your Airtable setup and GitHub repo
+# Config — one entry per Airtable table to sync
 # ---------------------------------------------------------------------------
-AIRTABLE_PAT   = os.environ["AIRTABLE_PAT"]
-BASE_ID        = "app6kSWgnKx3E5ULh"
-TABLE_NAME     = "Assets"
-ATTACH_FIELD   = "Photos"
-URL_FIELD      = "Permanent Photo URL"  # Must exist as a field in Airtable
+TABLES = [
+    {
+        "base_id":      "app6kSWgnKx3E5ULh",
+        "table_name":   "Assets",
+        "attach_field": "Photos",
+        "url_field":    "Permanent Photo URL",
+    },
+    {
+        "base_id":      "appVinwKwEnt5HAIk",
+        "table_name":   "Properties",
+        "attach_field": "Photo",
+        "url_field":    "Photo URL",
+    },
+]
 
-GITHUB_TOKEN   = os.environ["GITHUB_TOKEN"]
-GITHUB_REPO    = "Fiera-Real-Estate-UK/Asset-Images"
-GITHUB_BRANCH  = "main"
-IMAGE_DIR      = "images"  # Subdirectory in the repo where images are stored
+AIRTABLE_PAT  = os.environ["AIRTABLE_PAT"]
+GITHUB_TOKEN  = os.environ["GITHUB_TOKEN"]
+GITHUB_REPO   = "Fiera-Real-Estate-UK/Asset-Images"
+GITHUB_BRANCH = "main"
+IMAGE_DIR     = "images"
 
 # ---------------------------------------------------------------------------
 # Headers
@@ -31,27 +41,26 @@ github_headers = {
     "X-GitHub-Api-Version": "2022-11-28"
 }
 
-AIRTABLE_URL = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
-GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 
 
 # ---------------------------------------------------------------------------
 # Step 1: Fetch records that have a photo but no permanent URL yet
 # ---------------------------------------------------------------------------
-def get_records_needing_sync():
+def get_records_needing_sync(base_id, table_name, attach_field, url_field):
     records = []
-    offset = None
+    offset  = None
+    url     = f"https://api.airtable.com/v0/{base_id}/{table_name}"
 
     while True:
         params = {
-            # Only process records where Photos is populated and URL field is empty
-            "filterByFormula": f"AND({{Photos}}, {{Permanent Photo URL}} = '')",
-            "fields[]": [ATTACH_FIELD, "Name"]
+            "filterByFormula": f"AND({{{attach_field}}}, {{{url_field}}} = '')",
+            "fields[]": [attach_field, "Name"]
         }
         if offset:
             params["offset"] = offset
 
-        response = requests.get(AIRTABLE_URL, headers=airtable_headers, params=params)
+        response = requests.get(url, headers=airtable_headers, params=params)
         response.raise_for_status()
         data = response.json()
 
@@ -80,19 +89,17 @@ def get_extension(attachment: dict) -> str:
     filename = attachment.get("filename", "image.jpg")
     ext = Path(filename).suffix.lower()
     if ext not in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
-        ext = ".jpg"  # Safe fallback
+        ext = ".jpg"
     return ext
 
 
 # ---------------------------------------------------------------------------
-# Step 4: Commit image to GitHub via the Contents API
-# Returns the permanent raw.githubusercontent.com URL
+# Step 4: Commit image to GitHub and return the permanent URL
 # ---------------------------------------------------------------------------
 def commit_to_github(record_id: str, image_bytes: bytes, extension: str) -> str:
-    filename    = f"{IMAGE_DIR}/{record_id}{extension}"
-    api_path    = f"{GITHUB_API}/{filename}"
+    filename = f"{IMAGE_DIR}/{record_id}{extension}"
+    api_path = f"{GITHUB_API}/{filename}"
 
-    # Check if the file already exists — needed to get its SHA for updates
     sha = None
     check = requests.get(api_path, headers=github_headers)
     if check.status_code == 200:
@@ -101,10 +108,10 @@ def commit_to_github(record_id: str, image_bytes: bytes, extension: str) -> str:
     payload = {
         "message": f"Add image for Airtable record {record_id}",
         "content": base64.b64encode(image_bytes).decode("utf-8"),
-        "branch": GITHUB_BRANCH
+        "branch":  GITHUB_BRANCH
     }
     if sha:
-        payload["sha"] = sha  # Required by GitHub API when updating an existing file
+        payload["sha"] = sha
 
     response = requests.put(api_path, headers=github_headers, json=payload)
     response.raise_for_status()
@@ -113,12 +120,12 @@ def commit_to_github(record_id: str, image_bytes: bytes, extension: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Step 5: Write the permanent URL back to the Airtable record
+# Step 5: Write the permanent URL back to Airtable
 # ---------------------------------------------------------------------------
-def write_url_to_airtable(record_id: str, url: str):
-    payload = {"fields": {URL_FIELD: url}}
+def write_url_to_airtable(base_id, table_name, record_id, url_field, url):
+    payload  = {"fields": {url_field: url}}
     response = requests.patch(
-        f"{AIRTABLE_URL}/{record_id}",
+        f"https://api.airtable.com/v0/{base_id}/{table_name}/{record_id}",
         headers=airtable_headers,
         json=payload
     )
@@ -126,43 +133,47 @@ def write_url_to_airtable(record_id: str, url: str):
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Main — loops over all configured tables
 # ---------------------------------------------------------------------------
 def main():
-    print("Checking for records to sync...")
-    records = get_records_needing_sync()
-    print(f"Found {len(records)} record(s) needing sync.")
+    for table in TABLES:
+        base_id      = table["base_id"]
+        table_name   = table["table_name"]
+        attach_field = table["attach_field"]
+        url_field    = table["url_field"]
 
-    for record in records:
-        record_id   = record["id"]
-        attachments = record.get("fields", {}).get(ATTACH_FIELD, [])
+        print(f"\n--- {table_name} ({base_id}) ---")
+        records = get_records_needing_sync(base_id, table_name, attach_field, url_field)
+        print(f"Found {len(records)} record(s) needing sync.")
 
-        if not attachments:
-            print(f"  Skipping {record_id} — no attachments found")
-            continue
+        for record in records:
+            record_id   = record["id"]
+            attachments = record.get("fields", {}).get(attach_field, [])
 
-        # Only processes the first image — extend here if multi-image support needed
-        attachment = attachments[0]
-        url        = attachment.get("url")
+            if not attachments:
+                print(f"  Skipping {record_id} — no attachments found")
+                continue
 
-        if not url:
-            print(f"  Skipping {record_id} — attachment has no URL")
-            continue
+            attachment = attachments[0]
+            url        = attachment.get("url")
 
-        try:
-            print(f"  Processing {record_id}...")
-            extension     = get_extension(attachment)
-            image_bytes   = download_image(url)
-            permanent_url = commit_to_github(record_id, image_bytes, extension)
-            write_url_to_airtable(record_id, permanent_url)
-            print(f"  ✓ {permanent_url}")
+            if not url:
+                print(f"  Skipping {record_id} — attachment has no URL")
+                continue
 
-        except Exception as e:
-            # Log and continue — don't let one failure block the rest
-            print(f"  ✗ Failed for {record_id}: {e}")
-            continue
+            try:
+                print(f"  Processing {record_id}...")
+                extension     = get_extension(attachment)
+                image_bytes   = download_image(url)
+                permanent_url = commit_to_github(record_id, image_bytes, extension)
+                write_url_to_airtable(base_id, table_name, record_id, url_field, permanent_url)
+                print(f"  ✓ {permanent_url}")
 
-    print("Done.")
+            except Exception as e:
+                print(f"  ✗ Failed for {record_id}: {e}")
+                continue
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":
