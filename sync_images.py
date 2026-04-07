@@ -19,6 +19,12 @@ TABLES = [
         "attach_field": "Photo",
         "url_field":    "Photo URL",
     },
+    {
+        "base_id":      "appkiOATCNN0jhzjG",
+        "table_name":   "Projects",
+        "attach_field": "Photo",
+        "url_field":    "Photo URL",
+    }    
 ]
 
 AIRTABLE_PAT  = os.environ["AIRTABLE_PAT"]
