@@ -8,12 +8,13 @@ Airtable attachment URLs expire after a short period, making them unsuitable as 
 
 ## Business context
 
-Images are managed across two Airtable bases reflecting the structure of the two main business lines:
+Images are managed across three Airtable bases reflecting the structure of the business lines:
 
 - **Equity** — deals are always single-property. Images are stored at the deal level in the **Assets** table (`app6kSWgnKx3E5ULh`). One image per record.
 - **Debt** — deals can span multiple properties. Images are stored at the property level in the **Properties** table (`appVinwKwEnt5HAIk`), with one image per property record. This allows each property in a deal to carry its own image independently.
+- **Wrenbridge Sport** — project images are stored at the project level in the **Projects** table (`appkiOATCNN0jhzjG`). One image per record.
 
-In both cases, only the first attachment per record is synced.
+In all cases, only the first attachment per record is synced.
 
 ## How it works
 
@@ -33,8 +34,9 @@ Airtable record (attachment added)
 |---|---|---|---|---|
 | Equity | app6kSWgnKx3E5ULh | Assets | Photos | Permanent Photo URL |
 | Debt | appVinwKwEnt5HAIk | Properties | Photo | Photo URL |
+| Wrenbridge Sport | appkiOATCNN0jhzjG | Projects | Photo | Photo URL |
 
-To add a third table in future, add an entry to the `TABLES` list at the top of `sync_images.py` — no other changes needed.
+To add a further table in future, add an entry to the `TABLES` list at the top of `sync_images.py` — no other changes needed.
 
 ## Repo structure
 
@@ -48,7 +50,7 @@ Asset-Images/
 └── README.md
 ```
 
-Filenames use the Airtable record ID, which is unique across all bases, so there is no collision risk between the two tables sharing the same `images/` directory.
+Filenames use the Airtable record ID, which is unique across all bases, so there is no collision risk between tables sharing the same `images/` directory.
 
 ## GitHub Actions
 
@@ -64,11 +66,11 @@ One secret is required, set under **Settings → Secrets and variables → Actio
 
 | Secret | Description |
 |---|---|
-| `AIRTABLE_PAT` | Airtable Personal Access Token with read/write access to both the Assets and Properties tables |
+| `AIRTABLE_PAT` | Airtable Personal Access Token with read/write access to all three bases |
 
 `GITHUB_TOKEN` is provided automatically by GitHub Actions — no setup needed.
 
-> **Note:** Ensure the Airtable PAT has access to both bases (`app6kSWgnKx3E5ULh` and `appVinwKwEnt5HAIk`). If the Properties sync fails on first run, check the token's base permissions in Airtable's token settings.
+> **Note:** Ensure the Airtable PAT has access to all three bases (`app6kSWgnKx3E5ULh`, `appVinwKwEnt5HAIk`, `appkiOATCNN0jhzjG`). If a table fails on first run, check the token's base permissions in Airtable's token settings.
 
 ## Migrating existing records
 
@@ -85,5 +87,6 @@ To migrate them:
 |---|---|
 | Equity | Permanent Photo URL (Assets table) |
 | Debt | Photo URL (Properties table) |
+| Wrenbridge Sport | Photo URL (Projects table) |
 
 These URLs are permanent, publicly accessible, and render correctly in PDF and PowerPoint exports.
